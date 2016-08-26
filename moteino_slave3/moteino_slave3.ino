@@ -16,12 +16,13 @@
 
 // **** Config Variables
 #define WAIT_FOR_ACK        500
-#define WAIT_FOR_ACK_TX     1000
+#define WAIT_FOR_ACK_TX     500
 #define SEND_MSG_ATTEMPTS   3
 #define MINIMUM_MSG_LENGTH  10
 #define PACKET_SIZE         16
-#define WAIT_FOR_RESPONSE   2000
+#define WAIT_FOR_RESPONSE   1000
 #define DELAY_FAILED_PACKET 100
+#define DEBUG_OUTPUT        0
 
 //Match frequency to the hardware version of the radio on your Moteino (uncomment one):
 #define FREQUENCY     RF69_433MHZ        //RF69_915MHZ
@@ -310,16 +311,28 @@ void loop() {
       //Serial.print(NUM);
       //Serial.print("\t");
       //Serial.print( char(NUM) );
-      //ABC = char(NUM);
-      ABC = 't';
+      ABC = char(NUM);
+      //ABC = 't';
       
       if(ABC=='t'){
-        Serial.println("Begin");
+        sprintf(buff,"CMD : %c\t--Begin test sequence", ABC);
+        Serial.println(buff);
+        
         STM = 't';
         test_length = 0;
         Rx_timeouts = 0;
         Tx_timeouts = 0;
       }
+      else 
+      {
+        sprintf(buff,"CMD : %c\t--Idle mode.", ABC);
+        Serial.println(buff);
+        
+        STM = 'i';
+        
+        
+      }
+      
       
         // Eo if Serial read cmd
       }
@@ -474,19 +487,28 @@ void loop() {
         
       test_length++;
       
-      if( sequence[0]==end_char && sequence[1]==end_char && sequence[2]==end_char && sequence[3]==end_char )
+      if( sequence[12]==end_char && sequence[13]==end_char && sequence[14]==end_char && sequence[15]==end_char )
       {
-        //STM = 'i';    // Change state
+        STM = 'i';    // Change state
 
         // Reset sequence
         for(int a=0; a<PACKET_SIZE; a++){
           sequence[a] = begin_char;
         }
+
+        sprintf(buff,"Reached end of sequence.\nThank you,\tand good night.");
+        Serial.println(buff);
         // Eo if End sequence
       }
       // **** Eo     Test mode
     }
-
+    else{
+      // **** If not in test sequence mode
+      // be idle, read serial every 2 s
+      Serial.flush();
+      radio.receiveDone();
+      LowPower.powerDown(SLEEP_2S, ADC_OFF, BOD_ON); 
+    }
     //
      
     // *************** Eo Master If
