@@ -5,9 +5,9 @@
 #include <SPI.h>
 #include <LowPower.h> //get library from: https://github.com/lowpowerlab/lowpower
 
-#define NETWORKID    100  //the same on all nodes that talk to each other
-#define MASTER       1    //unique ID of the gateway/receiver
-#define SLAVE        2
+#define NETWORKID         100  //the same on all nodes that talk to each other
+#define MASTER            1    //unique ID of the gateway/receiver
+#define SLAVE             2
 #define DEBUG_OUTPUT        0
 #define CSV_OUTPUT          1
 
@@ -21,8 +21,6 @@
 #define PACKET_SIZE         16
 #define WAIT_FOR_RESPONSE   1000
 #define DELAY_FAILED_PACKET 100
-#define SERIAL_OUTPUT       CSV_OUTPUT
-
 
 //Match frequency to the hardware version of the radio on your Moteino (uncomment one):
 #define FREQUENCY     RF69_433MHZ        //RF69_915MHZ
@@ -50,6 +48,7 @@ uint8_t MSG_DATA[RF69_MAX_DATA_LEN];
 uint8_t MSG_LEN, MSG_SENDER_ID, MSG_TARGET_ID;
 int MSG_RSSI, rcv_count, counter;
 uint16_t test_length;
+char *MSG_TX_RSSI;   //[20];
 
 //String Letter;
 //char Packet[RF69_MAX_DATA_LEN];
@@ -63,6 +62,15 @@ uint8_t endloop = 0;
 uint8_t packet_successful = 0;
 long time_transmit, time_to_ack, time_to_response;
 int Tx_timeouts, Rx_timeouts;
+
+int p_index, p_length;
+//#define MAX_PACKET
+char RSP_VAR1[20];
+char RSP_VAR2[20];
+char RSP_VAR3[20];
+char RSP_VAR4[20];
+//char RSP_VAR1[20];
+
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -118,6 +126,7 @@ void handleButton()
 }
 
 byte LEDSTATE=LOW; //LOW=0
+int p;
 
 void loop() {
   
@@ -164,13 +173,13 @@ void loop() {
       else
         if(DEBUG_OUTPUT)  Serial.println("\t-- NO ACK requested");
 
-      if( MSG_DATA[0]==127 && MSG_DATA[1]==127 && MSG_DATA[4]==127 && MSG_DATA[5]==127 )
+      if( MSG_DATA[0]==int('#') && MSG_DATA[1]==int('#') && MSG_DATA[4]==int('#') && MSG_DATA[5]==int('#') )
       {
         // ****   initialise test run by transmitting msg [ # # X Y # # # P Q ... ]
         rcv_count = 0;
         if( char(MSG_DATA[2]) == 't' || char(MSG_DATA[3]) == 't' )
           STM = 't';
-
+        if(DEBUG_OUTPUT)    Serial.println("[Rx] Master reset test sequence byte received");
         // Read parameters from Frame?
       }
       else if(STM=='t')
@@ -192,7 +201,9 @@ void loop() {
                MSG_DATA[12],MSG_DATA[13],MSG_DATA[14],MSG_DATA[15]
                 );
     
-          if(DEBUG_OUTPUT)  Serial.print("\n[TX] Response frame:\t  buffer size: "); Serial.println(buff_s);
+          if(DEBUG_OUTPUT)  {
+            Serial.print("\n[TX] Response frame:\t  buffer size: "); Serial.println(buff_s);           }
+            
           //Serial.println(buff);
           endloop = 0;
 
@@ -437,7 +448,7 @@ void loop() {
           
           // ** Wait for Echo loop
           // *
-          while( !endloop ){
+          while( !endloop )  {
             
             if(radio.receiveDone() )
             {
@@ -458,12 +469,60 @@ void loop() {
                 MSG_DATA[i] = radio.DATA[i];
                 if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.print( char(MSG_DATA[i]) );       
               }
-
+              if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.println();
+              
               if (radio.ACKRequested()){
                 radio.sendACK();      
                 if(DEBUG_OUTPUT)   Serial.println("\t-- ACK Sent");
               }
 
+
+              // ########################### Unpack
+              
+              // read var 1
+              p_index = 1;
+              p_length = 0;
+              
+              while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
+                RSP_VAR1[p_length] = char(MSG_DATA[p_index]);
+                p_index++;               p_length++;
+              }
+              
+              p_index++;
+              RSP_VAR1[p_length]='\0';
+              p_length=0;
+              
+              while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
+                RSP_VAR2[p_length] = char(MSG_DATA[p_index]);
+                p_index++;                p_length++;
+              }
+              
+              p_index++;
+              RSP_VAR2[p_length]='\0';
+              p_length=0;
+              //RSP_VAR3="";
+              
+              while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
+                RSP_VAR3[p_length] = char(MSG_DATA[p_index]);
+                p_index++;                p_length++;
+              }
+
+              p_index++;
+              RSP_VAR3[p_length]='\0';
+              p_length=0;
+              
+              while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
+                RSP_VAR4[p_length] = char(MSG_DATA[p_index]);
+                p_index++;               p_length++;
+              }
+
+              // step off of coma
+              p_index++;
+              RSP_VAR3[p_length]='\0';
+              p_length=0;
+              
+              if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.print("\n");
+              
               if(DEBUG_OUTPUT)  
               {
                 sprintf(buff,"\n  [id:%d]",MSG_SENDER_ID);
@@ -476,9 +535,13 @@ void loop() {
                 Serial.println(buff);
               }
 
+              
               // ******** * * * * * * * Print successful packet CSV
               if(CSV_OUTPUT){
-
+              
+                sprintf(buff,"Unpacked response\n Var1:%s ,var2:%s, Var3:%s, Var4:%s",RSP_VAR1,RSP_VAR2,RSP_VAR3,RSP_VAR4);
+                Serial.println(buff);
+                
                 /* Print format
                  *  Sequence ID, Packet chars, ACK attempts, time to ack, Tx RSSI (slave), 
                  *    ... slave rcv count, slave resp attempts, Rx RSSI (master), time to response
@@ -500,14 +563,14 @@ void loop() {
                            counter, time_to_ack, 303, 17, 
                              2, -66, time_to_response   );
                 Serial.println(buff);
+              } // Eo CSV Output
 
+              
                 // Eo received packet
               }
-              
-              // got packet in radio.DATA
-            }
             else
             {
+              // If not received a packet
               // How much time has passed?
               time_to_response = millis() -time_transmit -time_to_ack;
               
@@ -546,12 +609,11 @@ void loop() {
       if( sequence[12]==end_char && sequence[13]==end_char && sequence[14]==end_char && sequence[15]==end_char )
       {
         STM = 'i';    // Change state
-
+        
         // Reset sequence
         for(int a=0; a<PACKET_SIZE; a++){
           sequence[a] = begin_char;
         }
-
         
         sprintf(buff,"Reached end of sequence.\nThank you,\tand good night.");
         Serial.println(buff);
@@ -585,3 +647,72 @@ void Blink(byte PIN, byte DELAY_MS, byte loops)
   }
 }
 
+/* index = starting at 0, positition of CSV
+ */
+char *packet_find_var(int index, uint8_t *DATARAY){
+  // 
+  char var[20];
+  int var_l = 0;
+  int comma;
+  int l=0;
+  int i=1;
+  
+  if(index!=0)
+  {
+    // *** get Nth variable
+    // finds comma number L
+    Serial.println("Finding comma");
+    while(l<index){
+      Serial.print(char(DATARAY[i]) );
+      if(DATARAY[i]==',')
+        l++;
+      i++;
+      // counts commas
+      // adds i+1 when found
+    }
+    sprintf(buff,"comma number %d!\nvariable letters:", index);
+    Serial.println(buff);
+    // add string until next comma    (or end-bracket ]  )
+    while(char(DATARAY[i])!=',' && char(DATARAY[i]!=']') )
+    {   //&& char(DATARAY[i]!='\0'
+      var[var_l] = char(DATARAY[i]);
+      Serial.print( var[var_l] );
+      var_l++;
+      i++;
+    }
+    Serial.println(",the End!");
+     
+    var[var_l] = '\0';
+    Serial.print(var[0] );
+    Serial.print(var[1] );
+    Serial.print(var[2] );
+    return var;
+  }
+  else
+  {
+    // *** to get first variable
+    // start after '['
+    // add chars until ','
+    i=1;
+    
+    while(char(DATARAY[i]) != ','){
+      var[var_l] = char(DATARAY[i]);
+      var_l++;
+      i++;
+    }
+   
+    var[var_l] = '\0';
+
+    return var;
+  }
+  // l = 1 for first comma, l=2 for 2nd, etc...
+  
+  // ********** Eo find packet variable
+}
+
+
+
+/* 
+ *  #################################################################################
+ */
+              
