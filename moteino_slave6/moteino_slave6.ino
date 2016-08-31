@@ -1,4 +1,5 @@
 // **** --------------------------------- C O D E
+// *
 
 #include <RFM69.h>    //get it here: https://www.github.com/lowpowerlab/rfm69
 #include "RF_lib.h"
@@ -10,13 +11,14 @@
 #define SLAVE             2
 #define DEBUG_OUTPUT        0
 #define CSV_OUTPUT          1
+#define CSV_DEBUG           0
 
 // **** * * * * * * * * * * * * *     *      *     *     *    *   Config Variables
 
 #define NODEID              MASTER 
-#define WAIT_FOR_ACK        500
-#define WAIT_FOR_ACK_TX     500
-#define SEND_MSG_ATTEMPTS   3
+#define WAIT_FOR_ACK        200
+#define WAIT_FOR_ACK_TX     300
+#define SEND_MSG_ATTEMPTS   4
 #define MINIMUM_MSG_LENGTH  10
 #define PACKET_SIZE         16
 #define WAIT_FOR_RESPONSE   1000
@@ -65,10 +67,11 @@ int Tx_timeouts, Rx_timeouts;
 
 int p_index, p_length;
 //#define MAX_PACKET
-char RSP_VAR1[20];
-char RSP_VAR2[20];
-char RSP_VAR3[20];
-char RSP_VAR4[20];
+char RSP_RCV_COUNT[PACKET_SIZE];
+char RSP_ATT_COUNT[PACKET_SIZE];
+char RSP_RSSI[PACKET_SIZE];
+char RSP_MSG_LEN[PACKET_SIZE];
+char RSP_MSG_DATA[PACKET_SIZE];
 //char RSP_VAR1[20];
 
 
@@ -97,8 +100,8 @@ void setup() {
   Rx_timeouts = 0;
   Tx_timeouts = 0;
   test_length = 0;
-  begin_char = 'a';
-  end_char = 'o';
+  begin_char = '0';
+  end_char = 'Z';
   
   for(int a=0; a<PACKET_SIZE; a++){
     sequence[a] = begin_char;
@@ -114,6 +117,9 @@ void setup() {
     else
       Serial.println("RF test request not ACKnowledged");
   }
+  
+  sprintf(buff,"CSV DATA FORMAT\nID, chars, matching, n_ACK, t_tack, Tx Rssi, rcv_count, n_SL_ACK, Rx RSSI, t_resp ");
+                Serial.println(buff);
 }
 
 //******** THIS IS INTERRUPT BASED DEBOUNCING FOR BUTTON ATTACHED TO D3 (INTERRUPT 1)
@@ -127,8 +133,10 @@ void handleButton()
 
 byte LEDSTATE=LOW; //LOW=0
 int p;
+uint8_t packets_equal;
 
 void loop() {
+  
   
   if(DEBUG_OUTPUT)  Serial.print("l");
 
@@ -193,7 +201,7 @@ void loop() {
           
           // [  count of received message, response attempt counter, TxRssi, MSG_LEN,  16 * Char ]
           counter = 0;
-          buff_s = sprintf(buff,"[%d,%d,%d,%d,%c%c%c%c:%c%c%c%c:%c%c%c%c:%c%c%c%c]",
+          buff_s = sprintf(buff,"[%d,%d,%d,%d,%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c]",
                rcv_count, counter, MSG_RSSI, MSG_LEN,
                MSG_DATA[0],MSG_DATA[1],MSG_DATA[2],MSG_DATA[3],
                MSG_DATA[4],MSG_DATA[5],MSG_DATA[6],MSG_DATA[7],
@@ -236,7 +244,7 @@ void loop() {
               {
                 // *** Repeat
                 if(DEBUG_OUTPUT)  Serial.println("\t-- NOT Acknl.  Repeating Response:");
-                buff_s = sprintf(buff,"[%d,%d,%d,%d,%c%c%c%c:%c%c%c%c:%c%c%c%c:%c%c%c%c]",
+                buff_s = sprintf(buff,"[%d,%d,%d,%d,%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c]",
                    rcv_count, counter, MSG_RSSI, MSG_LEN,
                    MSG_DATA[0],MSG_DATA[1],MSG_DATA[2],MSG_DATA[3],
                    MSG_DATA[4],MSG_DATA[5],MSG_DATA[6],MSG_DATA[7],
@@ -307,8 +315,7 @@ void loop() {
   }
   
   if(NODEID==MASTER)
-  {
-    //Serial.print("M");
+  {    
     /* ************************** * **  * * * * * * *  * * *  MASTER Code
      * 
      * Serial, chose ACK timeout, retry times
@@ -362,6 +369,10 @@ void loop() {
       
     if(STM=='t')
     {
+      if(CSV_DEBUG){
+        sprintf(buff,"begin of frame: %ld",millis() );
+        Serial.println(buff);      }
+        
       //Serial.print("t");
       if(DEBUG_OUTPUT)  {
         sprintf(buff,"[TX] New packet %d.",test_length);
@@ -370,39 +381,49 @@ void loop() {
       
       counter = 0;
       endloop = 0;
+
+      time_transmit = millis();
       
       // ***** Send package with retries and timeout  
       while(!endloop)
       {
-        time_transmit = millis();
         if(radio.sendWithRetry(SLAVE, sequence, PACKET_SIZE, 0, WAIT_FOR_ACK_TX ) )  
         {
           time_to_ack = millis() -time_transmit;
           radio.receiveDone();    // Put Master into Rx mode
           endloop = 1;
           packet_successful = 1;
-          if(DEBUG_OUTPUT)  {
-            sprintf(buff, "\t--- ACK Y! on %d. attmpt", counter+1);
-            Serial.println(buff);
-            sprintf(buff, "\t- d T :  %ld ms after transm.", time_to_ack );
+          
+          if(DEBUG_OUTPUT || CSV_DEBUG)  {
+            sprintf(buff, "\t- ACK Y! on %d. attmpt", counter+1);
+            Serial.print(buff);
+            sprintf(buff, "   d T :  %ld ms after transm.", time_to_ack );
             Serial.println(buff);
           }
           // *** Eo successful transmit
-        } 
+        }
         else
         {
-          
+          //!  Here fill response pack with 0000
+          counter++;
+            
           if(counter >= SEND_MSG_ATTEMPTS){
-            time_to_ack = 0; //millis() -time_transmit;
+            time_to_ack = millis() -time_transmit; // 0;
+            
+            if(CSV_DEBUG)  {
+              sprintf(buff,"[Fail] Millis: %ld, Tx time: %ld,  failed: %ld",millis(), time_transmit, time_to_ack);
+              Serial.println(buff);
+            }
+            
             endloop = 1;
             packet_successful = 0;
             Tx_timeouts++;
-            if(DEBUG_OUTPUT)  {
-              sprintf(buff,"\n[Tx] --Failed %d attmpts, \tTotal %d.", counter, Tx_timeouts);
+            if(DEBUG_OUTPUT || CSV_DEBUG)  {
+              sprintf(buff,"[Tx] --Failed %d attmpts, \tTotal %d.", counter, Tx_timeouts);
               Serial.println(buff);
-            }
+              }
           } // Eo -- Send msg attempts
-          counter++;
+          
         } //Eo else
 
         // exit loop --> endloop 
@@ -430,11 +451,29 @@ void loop() {
       
       
       // ************* Packet Acknowledged
+      // *
+      // *
       if(!packet_successful){
+        // ** Failed Packet
         if(DEBUG_OUTPUT)  Serial.println("[TX] ### Transmit failed");
         
         // Send report of failed pack
-
+        packets_equal = 0;
+        RSP_RSSI[0] = '0';
+        RSP_RSSI[1] = '\0';
+        //RSP_RCV_COUNT - leave as before
+        RSP_ATT_COUNT[0] = '0';
+        RSP_ATT_COUNT[1] = '\0';
+        MSG_RSSI = 0;
+        time_to_response = 0;
+                
+        if(CSV_OUTPUT){
+            sprintf(buff,"%d,%s,%d,%d,%ld,%s,%s,%s,%d,%ld,%ld",
+                   test_length,sequence,packets_equal,counter,time_to_ack, 
+                    RSP_RSSI,RSP_RCV_COUNT,RSP_ATT_COUNT,MSG_RSSI,
+                     time_to_response, millis()   );
+            Serial.println(buff);
+        }
         
         //delay(DELAY_FAILED_PACKET);
         // *** Eo unsuccessful packet routine
@@ -444,9 +483,11 @@ void loop() {
       }
       else
       {
+          // ***** Paket sent successfull
+          // *    > wait for response
           endloop = 0;
           
-          // ** Wait for Echo loop
+          // ** Wait for Response loop
           // *
           while( !endloop )  {
             
@@ -463,13 +504,14 @@ void loop() {
               MSG_RSSI = radio.RSSI;
               MSG_LEN = radio.DATALEN;
               
-              if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.print(" [Rx Msg]\t");
+              if(DEBUG_OUTPUT)  Serial.print(" [Rx Msg]\t"); 
+              
               for(int i=0;i<MSG_LEN;i++)
               {
                 MSG_DATA[i] = radio.DATA[i];
-                if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.print( char(MSG_DATA[i]) );       
+                if(DEBUG_OUTPUT )  Serial.print( char(MSG_DATA[i]) );    //!   
               }
-              if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.println();
+              if(DEBUG_OUTPUT )  Serial.println();//!
               
               if (radio.ACKRequested()){
                 radio.sendACK();      
@@ -478,50 +520,58 @@ void loop() {
 
 
               // ########################### Unpack
-              
+               
               // read var 1
               p_index = 1;
               p_length = 0;
               
               while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
-                RSP_VAR1[p_length] = char(MSG_DATA[p_index]);
+                RSP_RCV_COUNT[p_length] = char(MSG_DATA[p_index]);
                 p_index++;               p_length++;
               }
               
               p_index++;
-              RSP_VAR1[p_length]='\0';
+              RSP_RCV_COUNT[p_length]='\0';
               p_length=0;
               
               while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
-                RSP_VAR2[p_length] = char(MSG_DATA[p_index]);
+                RSP_ATT_COUNT[p_length] = char(MSG_DATA[p_index]);
                 p_index++;                p_length++;
               }
               
               p_index++;
-              RSP_VAR2[p_length]='\0';
+              RSP_ATT_COUNT[p_length]='\0';
               p_length=0;
               //RSP_VAR3="";
               
               while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
-                RSP_VAR3[p_length] = char(MSG_DATA[p_index]);
+                RSP_RSSI[p_length] = char(MSG_DATA[p_index]);
                 p_index++;                p_length++;
               }
 
               p_index++;
-              RSP_VAR3[p_length]='\0';
+              RSP_RSSI[p_length]='\0';
               p_length=0;
               
               while(char(MSG_DATA[p_index])!=',' && p_index<MSG_LEN)              {
-                RSP_VAR4[p_length] = char(MSG_DATA[p_index]);
+                RSP_MSG_LEN[p_length] = char(MSG_DATA[p_index]);
                 p_index++;               p_length++;
               }
 
-              // step off of coma
               p_index++;
-              RSP_VAR3[p_length]='\0';
+              RSP_MSG_LEN[p_length]='\0';
               p_length=0;
+
+              while(char(MSG_DATA[p_index])!=']' && p_index<MSG_LEN)              {
+                RSP_MSG_DATA[p_length] = char(MSG_DATA[p_index]);
+                p_index++;               p_length++;
+              }
               
-              if(DEBUG_OUTPUT || CSV_OUTPUT)  Serial.print("\n");
+              RSP_MSG_DATA[p_length]='\0';
+              //p_index++;
+              //p_length=0;
+              
+              if(DEBUG_OUTPUT )  Serial.print("\n");
               
               if(DEBUG_OUTPUT)  
               {
@@ -535,34 +585,59 @@ void loop() {
                 Serial.println(buff);
               }
 
-              
               // ******** * * * * * * * Print successful packet CSV
-              if(CSV_OUTPUT){
-              
-                sprintf(buff,"Unpacked response\n Var1:%s ,var2:%s, Var3:%s, Var4:%s",RSP_VAR1,RSP_VAR2,RSP_VAR3,RSP_VAR4);
+              if(DEBUG_OUTPUT){
+                sprintf(buff,"Unpacked response\n Rcv cnt:%s ,Ack Att:%s, Rx_RSSI:%s, Rsp Len:%s, Rsp Data:%s",
+                          RSP_RCV_COUNT,RSP_ATT_COUNT,RSP_RSSI,RSP_MSG_LEN,RSP_MSG_DATA);
                 Serial.println(buff);
+              }
+              
+              if(CSV_OUTPUT){
                 
                 /* Print format
                  *  Sequence ID, Packet chars, ACK attempts, time to ack, Tx RSSI (slave), 
                  *    ... slave rcv count, slave resp attempts, Rx RSSI (master), time to response
                  */
-                sprintf(buff,"ID, chars      , ACK, t_tack, Tx Rssi, rcv_count, SL_ACK, Rx RSSI, t_resp ");
-                Serial.println(buff);
+                
                 sequence[16]='\0';
-                
-                /*sprintf(buff,"%d,%s,%d,%ld,%d,%d,%d,%d,%ld",
-                          test_length, sequence, counter, time_to_ack, 
-                            303, 17, 2, -66, time_to_response   );    
-                Serial.println(buff);   */          
-                
-                sprintf(buff,"%d,",test_length);
-                Serial.print(buff);
-                for(int a=0;a<PACKET_SIZE;a++)        Serial.print(sequence[a]);
 
-                sprintf(buff,",%d,%ld,%d,%d,%d,%d,%ld",
-                           counter, time_to_ack, 303, 17, 
-                             2, -66, time_to_response   );
+                /*  char RSP_RCV_COUNT[20]; var1
+                  char RSP_ATT_COUNT[20]; var2 
+                  char RSP_RSSI[20];      var3
+                  char RSP_MSG_LEN[20];   var4
+                  char RSP_MSG_DATA[20];  variables5
+               */
+               
+                p_index=0;
+                endloop=1;  // used as boolean to show messages are equal
+                // equal until found a difference
+                packets_equal = 1;
+                
+                while(endloop==1 && p_index<PACKET_SIZE){
+                  
+                  // if any of the two is too short
+                  if(MSG_DATA[p_index]=='\0' || RSP_MSG_DATA[p_index]=='\0'){
+                    packets_equal = 0;
+                    endloop = 0;                  }
+
+                  // if not identical
+                  //if(char(MSG_DATA[p_index]) != RSP_MSG_DATA[p_index])
+                  if(sequence[p_index] != RSP_MSG_DATA[p_index])
+                  {   endloop = 0;
+                      packets_equal = 0;          }
+                  
+                  p_index++;
+                  // Eo while loop
+                }
+                
+                sprintf(buff,"%d,%s,%d,%d,%ld,%s,%s,%s,%d,%ld,%ld",
+                           test_length,sequence,packets_equal,counter,time_to_ack, 
+                            RSP_RSSI,RSP_RCV_COUNT,RSP_ATT_COUNT,MSG_RSSI,
+                             time_to_response,millis()   );
                 Serial.println(buff);
+
+                endloop=1;
+                
               } // Eo CSV Output
 
               
@@ -575,19 +650,35 @@ void loop() {
               time_to_response = millis() -time_transmit -time_to_ack;
               
               if(time_to_response >= WAIT_FOR_RESPONSE) {
+                // *** Timeout while waiting for response (Dispite Acknowledgement) 
+                // * print Tx msg details
                 Rx_timeouts++;
                 endloop = 1;
 
+                packets_equal = 0;
+                RSP_RSSI[0] = '0';
+                RSP_RSSI[1] = '\0';
+                //RSP_RCV_COUNT - leave as before
+                RSP_ATT_COUNT[0] = '0';
+                RSP_ATT_COUNT[1] = '\0';
+                
                 if(DEBUG_OUTPUT)  
                 {
                   sprintf(buff,"\n[Rx] --Failed #Response Timeout. No of timeouts:  %d", Rx_timeouts);
                   Serial.println(buff);
                 }
-                
+
+                if(CSV_OUTPUT){
+                    sprintf(buff,"%d,%s,%d,%d,%ld,%s,%s,%s,%d,%ld,%ld",
+                           test_length,sequence,packets_equal,counter,time_to_ack, 
+                            RSP_RSSI,RSP_RCV_COUNT,RSP_ATT_COUNT,MSG_RSSI,
+                             time_to_response, millis()   );
+                    Serial.println(buff);
+                }
                 //delay(DELAY_FAILED_PACKET);
                 Serial.flush();
                 radio.receiveDone();
-                LowPower.powerDown(SLEEP_500MS, ADC_OFF, BOD_ON); 
+                //LowPower.powerDown(SLEEP_500MS, ADC_OFF, BOD_ON); 
               }
                 
             } // Eo - else
@@ -615,7 +706,7 @@ void loop() {
           sequence[a] = begin_char;
         }
         
-        sprintf(buff,"Reached end of sequence.\nThank you,\tand good night.");
+        sprintf(buff,"Reached end of sequence.\nErrors:\nRx timeouts:  %d,\tTx timeouts: %d\nThank you,\tand good night.", Rx_timeouts, Tx_timeouts);
         Serial.println(buff);
         // Eo if End sequence
       }
