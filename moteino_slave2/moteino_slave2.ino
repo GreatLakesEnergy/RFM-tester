@@ -7,16 +7,16 @@
 #include <LowPower.h> //get library from: https://github.com/lowpowerlab/lowpower
 //*********************************************************************************************
 
-#define NETWORKID     100  //the same on all nodes that talk to each other
+#define NETWORKID    100  //the same on all nodes that talk to each other
 #define MASTER       1    //unique ID of the gateway/receiver
 #define SLAVE        2
-#define NODEID        SLAVE  //change to "SENDER" if this is the sender node (the one with the button)
+#define NODEID       SLAVE  //change to "SENDER" if this is the sender node (the one with the button)
 
 // **** Config Variables
 #define WAIT_FOR_ACK        500
-#define SEND_MSG_ATTEMPTS   0
+#define SEND_MSG_ATTEMPTS   3
 #define MINIMUM_MSG_LENGTH  10
-
+#define PACKET_SIZE         16
 //Match frequency to the hardware version of the radio on your Moteino (uncomment one):
 #define FREQUENCY     RF69_915MHZ
 #define ENCRYPTKEY    "sampleEncryptKey" //exactly the same 16 characters/bytes on all nodes!
@@ -47,6 +47,9 @@ char ABC, STM;
 int NUM;
 char buff[50];
 uint8_t buff_s;
+uint8_t sequence[PACKET_SIZE];                       
+int iki = 0;
+boolean endloop = 0;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -70,7 +73,10 @@ void setup() {
 
   rcv_count = 0;
   STM = 't';
-  
+
+  for(int a=0; a<PACKET_SIZE; a++){
+    sequence[a] = 'a';
+  }
 }
 
 //******** THIS IS INTERRUPT BASED DEBOUNCING FOR BUTTON ATTACHED TO D3 (INTERRUPT 1)
@@ -85,6 +91,7 @@ void handleButton()
 byte LEDSTATE=LOW; //LOW=0
 
 void loop() {
+  
   Serial.println("l");
 
   // ******     Slave
@@ -157,8 +164,10 @@ void loop() {
           Serial.println(buff);
           sprintf(buff,"\t-- Response ACKnowledged on %d. attempt", counter+1);
           Serial.println(buff);
-          
-      } // Eo STM - testing
+
+
+          // Eo STM - testing
+      } 
       else 
       if( MSG_DATA[0]==127 && MSG_DATA[1]==127 && MSG_DATA[4]==127 && MSG_DATA[5]==127 )
       {
@@ -190,13 +199,16 @@ void loop() {
         // ***** Serial stuff
         // *
         NUM = Serial.read();
-        Serial.print("Reading serial comm:\t");
-        Serial.println(NUM);
+        
         //Serial.println(char(NUM) );
         
         if( NUM != -1){
+          Serial.print("Reading serial comm:\t");
+          Serial.print(NUM);
+          Serial.print("\t");
           Serial.print( char(NUM) );
-          
+
+          // #################
           Serial.println("Begin");
     
           // Loop started by Serial
@@ -204,22 +216,80 @@ void loop() {
       
       // Eo Serial command receive
     }
-
+    
     radio.receiveDone(); //put radio in RX mode
     Serial.flush();
     LowPower.powerDown(SLEEP_2S, ADC_OFF, BOD_ON); 
+
     
     // *********************** Eo SLAVE If
   }
-  else 
+  
+  if(NODEID==MASTER)
   {
     /* ************************** MASTER Code
      * 
+     * Serial, chose ACK timeout, retry times
+     * 
+     *  if in loop test sending mode
+     *   send frame -> time sent
+     *     get ACK  -> time ACK
+     *   if not ACK, repeat ->  X times
+     *  
+     *  wait for response
+     *    get values into results array or write via serial.
+     *      - frame identical?
+     *      - Rssi Tx & Rx
+     *      
      */
+    NUM = Serial.read();
+       
+    if( NUM != -1){
+      Serial.print("Reading serial comm:\t");
+      //Serial.print(NUM);
+      //Serial.print("\t");
+      //Serial.print( char(NUM) );
+      ABC = char(NUM);
+
+      if(ABC=='t'){
+        Serial.println("Begin");
+        STM = 't';
+      }
+
+      
+      // Eo if Serial read cmd
+    }
+    if(STM=='t')
+    {
+      Serial.print("[TX] New packet");
+      
+      counter = 0;
+      sequence[iki] += 1;
+      iki = (iki + 1) % PACKET_SIZE;
+      
+      Serial.print(sequence);
+      
+      while(!EndLoop)
+      {
+        if(radio.sendWithRetry(SLAVE, sequence, PACKET_SIZE, 0, WAIT_FOR_ACK ) ){
+          EndLoop = 1;
+          
+        }
+        else{
+          counter++;
+          Serial.print("\t##Reattmpt");
+        }
+      
+        
+      }
+      
+    }
     
+     
+    // *************** Eo Master If
   }
 
-  //Eo Loop
+  //Eo *************************************      * * * * * * * * * * * * *    LOOP
 } 
 
 String int_to_digits( int pijin, int digits){
