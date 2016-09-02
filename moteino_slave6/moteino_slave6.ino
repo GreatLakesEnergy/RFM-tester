@@ -36,9 +36,9 @@
 uint8_t DEBUG_OUTPUT =       0;
 uint8_t CSV_OUTPUT =         1;
 uint8_t CSV_DEBUG =          0;
-
+  
 // **** * * * * * * * * * * * * *     *      *     *     *    *   Config Variables
-
+  
 #define NODEID              MASTER 
 #define WAIT_FOR_ACK        200
 #define WAIT_FOR_ACK_TX     300
@@ -99,9 +99,12 @@ char RSP_MSG_DATA[PACKET_SIZE];
 //char RSP_VAR1[20];
 
 // **** Stat vars
-long s_tx_rssi, s_tx_rssi_min, s_tx_rssi_max;
-long s_rx_rssi, s_rx_rssi_min, s_rx_rssi_max;
-int16_t var1;
+long s_tx_rssi, s_rx_rssi;
+int avrg_count;
+int s_tx_rssi_min, s_tx_rssi_max, s_rx_rssi_min, s_rx_rssi_max;
+int var1;
+long time_end;
+float finger;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -130,6 +133,8 @@ void setup() {
   test_length = 0;
   begin_char = 'A';
   end_char = 'J';
+  avrg_count = 0;
+  s_tx_rssi = 0;
   s_tx_rssi_min = 0;
   s_tx_rssi_max = 0;
   s_rx_rssi = 0;
@@ -395,7 +400,7 @@ void loop() {
      *      - frame identical?
      *      - Rssi Tx & Rx
      *      
-     *  ***************************************  * * * * * * 
+     *  ************************** * * * * * * * * * * * 
      */
     
     ABC = Serial.read();
@@ -421,6 +426,7 @@ void loop() {
           Tx_timeouts = 0;
           for(int a=0; a<PACKET_SIZE; a++)
           {          sequence[a] = begin_char;         }
+          avrg_count = 0;
           s_tx_rssi = 0;
           s_tx_rssi_min = 0;
           s_tx_rssi_max = 0;
@@ -441,22 +447,29 @@ void loop() {
           Tx_timeouts = 0;
           for(int a=0; a<PACKET_SIZE; a++)
           {          sequence[a] = begin_char;         }
+          avrg_count = 0;
+          s_tx_rssi = 0;
           s_tx_rssi_min = 0;
           s_tx_rssi_max = 0;
           s_rx_rssi = 0;
           s_rx_rssi_min = 0;
           s_rx_rssi_max = 0;
+          
+          
         break;
         case 'h':
           Serial.println("Hello");
+          
         break;
         case 'i':
           sprintf(buff,"CMD : %c\t--Idle mode.", ABC);
           Serial.println(buff);
           STM = 'i';
+          
         break;
         default:
           Serial.print("Serial: what?\n");  
+          
         break;
          
       }   // *** Serial CMD Switch
@@ -691,6 +704,11 @@ void loop() {
                           RSP_RCV_COUNT,RSP_ATT_COUNT,RSP_RSSI,RSP_MSG_LEN,RSP_MSG_DATA);
                 Serial.println(buff);
               }
+              if(DEBUG_OUTPUT){
+                sprintf(buff,"Tx Rssi: %d\t Rx Rssi: %d", var1, MSG_RSSI);
+                Serial.println(buff);
+              }
+                
 
               // * quick point average
               if(CSV_OUTPUT){
@@ -699,26 +717,30 @@ void loop() {
                 s_rx_rssi += MSG_RSSI;
                 var1 = string_to_int(RSP_RSSI);
                 s_tx_rssi += var1;
-
+                avrg_count++;
+                
                 // get mins & maxs
-                if(s_rx_rssi_min==0)
-                  s_rx_rssi_min = MSG_RSSI;
-                if(s_rx_rssi_max==0)
-                  s_rx_rssi_max = MSG_RSSI;
-                if(s_tx_rssi_min==0)
-                  s_tx_rssi_min = var1;
-                if(s_tx_rssi_max==0)
-                  s_tx_rssi_max = var1;
+                if(s_rx_rssi_min==0)                  s_rx_rssi_min = MSG_RSSI;
+                if(s_rx_rssi_max==0)                  s_rx_rssi_max = MSG_RSSI;
+                if(s_tx_rssi_min==0)                  s_tx_rssi_min = var1;
+                if(s_tx_rssi_max==0)                  s_tx_rssi_max = var1;
+                
                 // update mins & max
-                if(MSG_RSSI<s_rx_rssi_min)
-                  s_rx_rssi_min = MSG_RSSI;
-                if(MSG_RSSI>s_rx_rssi_max)
+                //if(MSG_RSSI!=0)
+                  if(MSG_RSSI<s_rx_rssi_min)   {
+                    s_rx_rssi_min = MSG_RSSI;
+                  }
+                if(MSG_RSSI>s_rx_rssi_max) {
                   s_rx_rssi_max = MSG_RSSI;
-                  
-                if(var1<s_tx_rssi_min)
-                  s_tx_rssi_min = var1;
-                if(var1>s_tx_rssi_max)
+                }
+                
+                //if(var1!=0)  
+                  if(var1<s_tx_rssi_min){
+                    s_tx_rssi_min = var1;
+                  }
+                if(var1>s_tx_rssi_max)  {
                   s_tx_rssi_max = var1;
+                }
                 
                 //  s_tx_rssi, s_tx_rssi_min, s_tx_rssi_max;
                 //  s_rx_rssi, s_rx_rssi_min, s_rx_rssi_max;
@@ -842,28 +864,35 @@ void loop() {
       
       if( sequence[12]==end_char && sequence[13]==end_char && sequence[14]==end_char && sequence[15]==end_char )
       {
+        time_end = millis();
+        
         STM = 'i';    // Change state
         
         // Reset sequence
-        for(int a=0; a<PACKET_SIZE; a++){
+        /*for(int a=0; a<PACKET_SIZE; a++){
           sequence[a] = begin_char;
-        }
+        } */
         sprintf(buff,"CSV DATA FORMAT\nID, sequence, Ackwledged, Ack Retries, T_Ack,Tx RSSI, ...");
           Serial.println(buff);
         sprintf(buff,"\t... Rcv count, Matching?, Rsp Ack retries, Rsp RSSI, t Resp, t millis");
           Serial.println(buff);
 
-        s_tx_rssi = int( s_tx_rssi/test_length);
-        s_rx_rssi = int( s_rx_rssi/test_length);
+        s_tx_rssi = int( s_tx_rssi/avrg_count );
+        s_rx_rssi = int( s_rx_rssi/avrg_count );
         sprintf(buff,"Reached end of sequence.\nErrors:\nRx timeouts:  ");
           Serial.print(buff);
-        sprintf(buff,"%d,\tTx timeouts: %d\nThank you,\tand good night.", Rx_timeouts, Tx_timeouts);
+        sprintf(buff,"%d,\tTx timeouts: %d", Rx_timeouts, Tx_timeouts);
           Serial.println(buff);
-        sprintf(buff,"Tx RSSO Avrg: %d\tmin: %d, max: %d", s_tx_rssi, s_tx_rssi_min, s_tx_rssi_max );
+        sprintf(buff,"Tx RSSO Avrg: %ld\tmin: %d, max: %d", s_tx_rssi, s_tx_rssi_min, s_tx_rssi_max );
           Serial.println(buff);
-        sprintf(buff,"Rx RSSO Avrg: %d\tmin: %d, max: %d", s_rx_rssi, s_rx_rssi_min, s_rx_rssi_max );
+        sprintf(buff,"Rx RSSO Avrg: %ld\tmin: %d, max: %d", s_rx_rssi, s_rx_rssi_min, s_rx_rssi_max );
           Serial.println(buff);
-
+        
+        finger = (1.0*time_end) / test_length;
+        sprintf(buff,"Sequence of %d values, %ld ms,  > ms per packet: ", test_length, time_end);
+          Serial.print(buff);
+          Serial.println(finger );
+        
             //  s_tx_rssi, s_tx_rssi_min, s_tx_rssi_max;
             //  s_rx_rssi, s_rx_rssi_min, s_rx_rssi_max;
           
@@ -899,8 +928,8 @@ void Blink(byte PIN, byte DELAY_MS, byte loops)
 }
 
 
-uint16_t power( uint16_t base, int expo){
-  uint16_t singular = base;
+int power( int base, int expo){
+  int singular = base;
   base = 1;
   
   for(int i=0; i<expo; i++){
@@ -925,14 +954,28 @@ int char_to_digit( char T){
 
 int string_to_int(char *number){
   // get length
-  uint16_t digit = 0;
+  int digit = 0;
   
   int i=0;
   int l = string_length(number);  
-  
-  for(int i=0;i<l;i++)
+
+  if(number[0]=='-'){
+    // negatives
+    for(int i=1;i<l;i++)
+    {
+      digit += char_to_digit(number[i]) *power(10,l-i-1);
+      //sprintf(buff,"Digit: %c, = %d,\t now number is %d",number[i], char_to_digit(number[i]), digit);
+      //Serial.println(buff);
+    }
+    digit = -digit;
+  }
+  else
   {
-    digit += char_to_digit(number[i]) *power(10,l-i-1);
+    // positives
+    for(int i=0;i<l;i++)
+    {
+      digit += char_to_digit(number[i]) *power(10,l-i-1);
+    }
   }
   return digit;
   
