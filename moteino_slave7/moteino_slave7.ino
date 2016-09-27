@@ -48,7 +48,7 @@ uint8_t CSV_DEBUG =          0;
 #define WAIT_FOR_ACK_SL           200
 #define WAIT_FOR_ACK_TX           200
 #define SEND_RETRIES              0
-#define SEND_MSG_ATTEMPTS         3     // these are actually number of X retries
+#define SEND_MSG_ATTEMPTS         0     // these are actually number of retries
 #define SEND_MSG_ATTEMPTS_SL      3
 //#define MINIMUM_MSG_LENGTH        10  -- no longer used
 #define PACKET_SIZE               16
@@ -82,11 +82,11 @@ uint8_t MSG_DATA[RF69_MAX_DATA_LEN];
 uint8_t MSG_LEN, MSG_SENDER_ID, MSG_TARGET_ID;
 int MSG_RSSI, rcv_count, counter;
 uint16_t test_length;
-char *MSG_TX_RSSI;   //[20];
+char *MSG_TX_RSSI;   // [20];
 
 char Letter[10];
 //char Packet[RF69_MAX_DATA_LEN];
-char ABC, STM;
+char ABC, STATE, STM;
 int NUM;
 char buff[100];
 char temp[20];
@@ -95,7 +95,7 @@ char sequence[PACKET_SIZE];
 int iki = 0;
 uint8_t endloop = 0;
 uint8_t packet_successful = 0;
-long time_transmit, time_to_ack, time_to_response, time_begin;
+long time_begin_transmit, time_to_ack, time_to_response, time_begin;
 int Tx_timeouts, Rx_timeouts;
 uint16_t stat_attmpts[SEND_MSG_ATTEMPTS+1];
 
@@ -138,39 +138,14 @@ void setup() {
   sprintf(buff,"Bite-rate set to %d", BITRATE);
     Serial.println(buff);
   Serial.flush();
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   attachInterrupt(BUTTON_INT, handleButton, FALLING);
-
   
-  if( NODEID==MASTER)
-    RECIPIENT = SLAVE;
-  if(NODEID==SLAVE)
-    RECIPIENT = MASTER;
   
-  rcv_count = 0;
-  STM = 't';
-  Rx_timeouts = 0;
-  Tx_timeouts = 0;
-  test_length = 0;
-  begin_char = 'A';
-  end_char = 'J';
-  avrg_count = 0;
-  s_tx_rssi = 0;
-  s_tx_rssi_min = 0;
-  s_tx_rssi_max = 0;
-  s_rx_rssi = 0;
-  s_rx_rssi_min = 0;
-  s_rx_rssi_max = 0;
+  STATE = 't';
+  initialise_sequence('A','J');
   
-  for(int a=0; a<PACKET_SIZE; a++)
-    {          sequence[a] = begin_char;         }
-
-  for(int a=0; a<SEND_MSG_ATTEMPTS+1;a++)
-    {           stat_attmpts[a]= 0;     }
-    
-  //sequence[16] = '\0';
-
   if(NODEID==MASTER){
     buff_s = sprintf(buff,"##tt##1234567890");
     if(radio.sendWithRetry(SLAVE, buff, buff_s, 3, WAIT_FOR_ACK_TX ) )
@@ -207,7 +182,7 @@ void setup() {
   Serial.println(buff);
   sprintf(buff,"mathable like so:  %d", 2*string_to_int(Letter) );
   Serial.println(buff);
-  STM = 'i';
+  STATE = 'i';
   sprintf(buff,"char %c to digit %d.\nagain %c to %d.", '9', char_to_digit('9'),'0', char_to_digit('0') );
   Serial.println(buff);
   */
@@ -239,6 +214,13 @@ void loop() {
     //Serial.print("s");
     if(radio.receiveDone())
     {
+      if (radio.ACKRequested()){
+        radio.sendACK();      
+        if(DEBUG_OUTPUT)  Serial.println("\t-- ACK Sent");
+      }
+      else
+        if(DEBUG_OUTPUT)  Serial.println("\t-- NO ACK requested");
+
       
       if(DEBUG_OUTPUT)  Serial.println("[RX] Receiving");
       rcv_count++;
@@ -247,13 +229,13 @@ void loop() {
       //MSG_TARGET_ID = NODEID;
       MSG_RSSI = radio.RSSI;
       MSG_LEN = radio.DATALEN;
-      
+
       if(DEBUG_OUTPUT)  Serial.print("[MSG]\t");
       for(int i=0; i<MSG_LEN; i++){
         MSG_DATA[i] = radio.DATA[i];
         if(DEBUG_OUTPUT)  Serial.print( char(MSG_DATA[i]) );       
       }
-
+      
       if(DEBUG_OUTPUT)  {
         sprintf(buff,"\n[id:%d]",MSG_SENDER_ID);
         Serial.print(buff);
@@ -265,23 +247,18 @@ void loop() {
         Serial.println(buff);
       }
       
-      if (radio.ACKRequested()){
-        radio.sendACK();      
-        if(DEBUG_OUTPUT)  Serial.println("\t-- ACK Sent");
-      }
-      else
-        if(DEBUG_OUTPUT)  Serial.println("\t-- NO ACK requested");
+      
 
       if( MSG_DATA[0]==int('#') && MSG_DATA[1]==int('#') && MSG_DATA[4]==int('#') && MSG_DATA[5]==int('#') )
       {
         // ****   initialise test run by transmitting msg [ # # X Y # # # P Q ... ]
         rcv_count = 0;
         if( char(MSG_DATA[2]) == 't' || char(MSG_DATA[3]) == 't' )
-          STM = 't';
+          STATE = 't';
         if(DEBUG_OUTPUT)    Serial.println("[Rx] Master reset test sequence byte received");
         // Read parameters from Frame?
       }
-      else if(STM=='t')
+      else if(STATE=='t')
       {
           if(LEDSTATE==LOW)
             LEDSTATE=HIGH;
@@ -333,7 +310,7 @@ void loop() {
               else
               {
                 // Count After (instead of) loop, counter = number of RETRIES
-                //counter++;
+                counter++;
                 
                 // *** Repeat
                 if(DEBUG_OUTPUT)  Serial.println("\t-- NOT Acknl.  Repeating Response:");
@@ -347,7 +324,7 @@ void loop() {
                 } //Eo else
               
             } // Eo if send failed
-            counter++;
+            //counter++;
             // Exit --> with endloop
             // ***  Eo while  
           }
@@ -357,7 +334,7 @@ void loop() {
           // * Countdistribution of retries
           //stat_attmpts[counter-1]++;
           
-          // Eo STM - testing
+          // Eo STATE - testing
       }
       else
       {
@@ -367,7 +344,7 @@ void loop() {
             sprintf(buff, "Slave in Idle mode, whats this msg?");
             Serial.println(buff);
             
-            //STM = 'i';
+            //STATE = 'i';
             Serial.flush();
             radio.receiveDone();
             LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_ON); 
@@ -443,48 +420,16 @@ void loop() {
         case 't':
           sprintf(buff,"CMD : %c\t--Begin test sequence", ABC);
           Serial.println(buff);
-          STM = 't';
-          begin_char='A';
-          end_char='Z';
-          iki=0;
-          test_length = 0;
-          Rx_timeouts = 0;
-          Tx_timeouts = 0;
-          for(int a=0; a<PACKET_SIZE; a++)
-          {          sequence[a] = begin_char;         }
-          for(int a=0; a<SEND_MSG_ATTEMPTS+1;a++)
-          {           stat_attmpts[a]= 0;     }
-          avrg_count = 0;
-          s_tx_rssi = 0;
-          s_tx_rssi_min = 0;
-          s_tx_rssi_max = 0;
-          s_rx_rssi = 0;
-          s_rx_rssi_min = 0;
-          s_rx_rssi_max = 0;
+          STATE = 't';
+          initialise_sequence('A', 'Z' );
           delay(1000);
           time_begin = millis();
         break;
         case 's':
           sprintf(buff,"CMD : %c\t--Re-SET test sequence", ABC);
           Serial.println(buff);
-          STM = 't';
-          begin_char = Serial.read();
-          end_char = Serial.read();
-          iki = 0;
-          test_length = 0;
-          Rx_timeouts = 0;
-          Tx_timeouts = 0;
-          for(int a=0; a<PACKET_SIZE; a++)
-          {          sequence[a] = begin_char;         }
-          for(int a=0; a<SEND_MSG_ATTEMPTS+1;a++)
-          {           stat_attmpts[a]= 0;     }
-          avrg_count = 0;
-          s_tx_rssi = 0;
-          s_tx_rssi_min = 0;
-          s_tx_rssi_max = 0;
-          s_rx_rssi = 0;
-          s_rx_rssi_min = 0;
-          s_rx_rssi_max = 0;
+          STATE = 't';
+          initialise_sequence(Serial.read(), Serial.read() );
           delay(1000);
           time_begin = millis();
         break;
@@ -495,24 +440,8 @@ void loop() {
         case 'c':
           sprintf(buff,"CMD : %c\t--Begin continuous", ABC);
           Serial.println(buff);
-          STM = 'c';
-          begin_char='a';
-          end_char='~';
-          iki=0;
-          test_length = 0;
-          Rx_timeouts = 0;
-          Tx_timeouts = 0;
-          for(int a=0; a<PACKET_SIZE; a++)
-          {          sequence[a] = begin_char;         }
-          for(int a=0; a<SEND_MSG_ATTEMPTS+1;a++)
-          {           stat_attmpts[a]= 0;     }
-          avrg_count = 0;
-          s_tx_rssi = 0;
-          s_tx_rssi_min = 0;
-          s_tx_rssi_max = 0;
-          s_rx_rssi = 0;
-          s_rx_rssi_min = 0;
-          s_rx_rssi_max = 0;
+          STATE = 'c';
+          initialise_sequence('a', '~');
           delay(1000);
           time_begin = millis();
         break;
@@ -523,7 +452,7 @@ void loop() {
         case 'i':
           sprintf(buff,"CMD : %c\t--Idle mode.", ABC);
           Serial.println(buff);
-          STM = 'i';
+          STATE = 'i';
           
         break;
         default:
@@ -536,9 +465,9 @@ void loop() {
         // Eo if Serial read cmd
       }
     
-    //Serial.print(STM);
+    //Serial.print(STATE);
       
-    if(STM=='t' || STM=='s' || STM=='c')
+    if(STATE=='t' || STATE=='s' || STATE=='c')
     {
       if(CSV_DEBUG){
         sprintf(buff,"begin of frame: %ld",millis() );
@@ -549,18 +478,20 @@ void loop() {
         sprintf(buff,"[TX] New packet %d.",test_length);
         Serial.print(buff);
       }
-      
+
+      // Variables for the send-Packet-loop
       counter = 0;
       endloop = 0;
       
-      time_transmit = millis();
+      time_begin_transmit = millis();
       
       // ***** Send package with retries and timeout  
       while(!endloop)
       {
         if(radio.sendWithRetry(SLAVE, sequence, PACKET_SIZE, SEND_RETRIES, WAIT_FOR_ACK_TX ) )  
         {
-          time_to_ack = millis() -time_transmit;
+          
+          time_to_ack = millis() -time_begin_transmit;
           radio.receiveDone();    // Put Master into Rx mode
           endloop = 1;
           packet_successful = 1;
@@ -575,10 +506,10 @@ void loop() {
         }
         if(!endloop)  // if NOT successful, check counter
           if(counter >= SEND_MSG_ATTEMPTS){
-            time_to_ack = millis() -time_transmit; // 0;
+            time_to_ack = millis() -time_begin_transmit; // 0;
             
             if(CSV_DEBUG)  {
-              sprintf(buff,"[Fail] Millis: %ld, Tx time: %ld,  failed: %ld",millis(), time_transmit, time_to_ack);
+              sprintf(buff,"[Fail] Millis: %ld, Tx time: %ld,  failed: %ld",millis(), time_begin_transmit, time_to_ack);
               Serial.println(buff);
             }
             
@@ -672,7 +603,7 @@ void loop() {
             
             if(radio.receiveDone() )
             {
-              time_to_response = millis() -time_transmit -time_to_ack;
+              time_to_response = millis() -time_begin_transmit -time_to_ack;
               
               // *** If received something
               // *
@@ -871,8 +802,8 @@ void loop() {
             else
             {
               // If not received a packet
-              // How much time has passed?
-              time_to_response = millis() -time_transmit -time_to_ack;
+              // How much time has passed since acknowledgement
+              time_to_response = millis() -time_begin_transmit -time_to_ack;
               
               if(time_to_response >= WAIT_FOR_RESPONSE) {
                 // *** Timeout while waiting for response (Dispite Acknowledgement) 
@@ -940,7 +871,7 @@ void loop() {
         // If End of Sequance packet
         time_end = millis() -time_begin;
         
-        STM = 'i';    // Change state
+        STATE = 'i';    // Change state
         
         // Reset sequence
         /*for(int a=0; a<PACKET_SIZE; a++){
@@ -982,7 +913,7 @@ void loop() {
 
         
         Serial.print("\n");
-        for(int a=0; a<SEND_MSG_ATTEMPTS+1;a++)
+        for(int a=0; a<SEND_MSG_ATTEMPTS+2;a++)
         {
           sprintf(buff,"%d, ",stat_attmpts[a]);
           Serial.print(buff);
@@ -1014,18 +945,31 @@ void loop() {
   //Eo *************************************      * * * * * * * * * * * * *    LOOP
 }
 
-void Blink(byte PIN, byte DELAY_MS, byte loops)
-{
-  for (byte i=0; i<loops; i++)
-  {
-    digitalWrite(PIN,HIGH);
-    delay(DELAY_MS);
-    digitalWrite(PIN,LOW);
-    delay(DELAY_MS);
-  }
+void initialise_sequence( char first_char, char last_char){
+    begin_char=first_char;
+    end_char=last_char;
+    iki=0;
+    test_length = 0;
+    rcv_count = 0;
+    Rx_timeouts = 0;
+    Tx_timeouts = 0;
+    for(int a=0; a<PACKET_SIZE; a++)
+    {          sequence[a] = begin_char;         }
+    for(int a=0; a<SEND_MSG_ATTEMPTS+2;a++)
+    {           stat_attmpts[a]= 0;     }
+    avrg_count = 0;
+    s_tx_rssi = 0;
+    s_tx_rssi_min = 0;
+    s_tx_rssi_max = 0;
+    s_rx_rssi = 0;
+    s_rx_rssi_min = 0;
+    s_rx_rssi_max = 0;
 }
 
-
+    
+  
+  
+          
 int power( int base, int expo){
   int singular = base;
   base = 1;

@@ -2,6 +2,80 @@
 
 Platform for testing RFM69 based modules with atmega328 based microcontrollers
 
+# The simple approach
+With added complexity and useful functions
+
+##test_range_3
+A much simpler test than before...
+Split into Master and Slave
+
+#Beacon
+The SLave is bacon, it just sits and transmits short pulsed messages at an interval. This contains a demo variable and value. it also contains a packet ID.
+This is extracted and read by the Master in order to determine when Packets are lost.
+
+#Master
+So everything else is done by the master
+The master is only listening to incoming packets. in experience this works better if it goes into sleep mode and is woken up by Receive interrupt than if it is running in a while loop. Though my loop consists of if-statements that should not be entered it seems to be too slow.
+So let it go to sleep.
+
+##Test sequence
+So the Master:
+- receives Packets,
+- extracts the packet ID to track dropped packages
+- coutns the received and dropped packages
+- records min and max RSSI and calculates the average
+- When the received packages reach TEST_WINDOW it prints the test output of the mentioned variables, not in CSV. just read it
+
+##Test variables
+- TEST_WINDOW can be changed by typing "tINTEGER" into Serial command window.  e.g. "t50"
+- Send a 0 over Serial to start the test from the beginning. if you dont want to wait or restart
+- DEBUG = 0 switches DEBUG output OFF. switch this on in case things are not going as expected. 
+- this can be done by typing "d1" / "d0" into Serial window
+- CSV_OUTPUT = 1  prints a one-line output for every received packet. if the test is running smooth this could be turned off to see all test-results on one page.
+- The Beacon transmit period is the enum BEACON_SLEEP
+- THis can be changed by typing "iINTEGER" into Serial window. The master then sends a commadn packet to the Beacon
+- The interval can only be 60, 120, 250, 500, 1000, 2000 MS, type the MS as integer like this e.g. "i500"
+- Even the Bitrate can be changed over air, 
+	for 55.5 kByps type "b555"
+	for 19.2 kByps type "b192"
+	for 1.9 kByps type "b19"
+- All these RF commands can get lost when the Beacon is transmitting. (though they are resent 3 times it can happen at high Beacon frequencies). So best first send "i1000" the change f_beacon to 1s then send a bitrate command. If they lose each other the Master can be reset and set to the Beacon Bitrate to pick-up
+- The beacon Blinks quickly 4 times upon receiving command packets
+
+##Useful functions
+I added functions to simplify the code so a basic RF program requires 
+- a message struct that stores incoming messages
+- receive_message( boolean DEBUG_PRINTOUT)
+	unpacks an incoming message into the struct and send an ACK if requested.
+- The message can then be processed from the message. struct
+- Unpack_variable unpacks comma-separated variables from a char-array (in this case message.data) and fills it into a target array.
+- To unpack several variables it returns the postition AFTER the comma it reached and takes a parameter of which position to start
+- additionally there is a string_to_integer( ) function that does what it says. Make sure your char array ends with an End-char '\0'. It can read signed 16 bit integers
+- has an initialise() and restart function() that initialises all variables. 
+
+##Though not in a separate function
+- The code for reading Serial commands is working well and can be adjusted for purposes
+- The code for recognising command packets and extracting variables is working well and can be easily adjusted.
+
+# Strings
+A word about strings
+strings  or char arrays are unavoidable for this since messages are sent and received as such and probably something will be sent to Serial too.
+1. For each string it is best to have a designated char array initialised at a size to hold all eventualities
+2. Add end-char's yourself '\0' to mark the end of a message when filling a long array manually
+3. Keep debug message strings short or fill them into a buff(er) with sprintf() then print the buffer.
+
+Arduino has some wierd issues with strings and making mistakes here causes wierd faults in completely different places and strange repititions. If the program fails with wierd print errors comment out some long print statements you potentially made
+
+.
+.
+.
+
+...
+
+......
+
+# The much to complicated Approach
+
 V1 to 5 were saved during development to remain executable
 
 # QUICKSTART
