@@ -1,22 +1,28 @@
 /*    
  *   *    This program receives messages from the Beacon. and displays a few parameters in Serial output:
  *   
- *   use #DEFINES
- *   - DEBUGGING - to display the received packet
+ *   - DEBUGGING - TRUE to display Debugg information of packet reception
  *      ""[Rx] 66,tmp1,369
+ *      Can be switched by serial command d1, d0
  *      
- *   - CSV_OUTPUT   to display
- *      packet_count , msg RSSI, and current count of dropped messages
+ *   - CSV_OUTPUT - TRUE to display infromation for each recevied packet
+ *      # packet_count , msg RSSI, and current count of dropped messages
  *      ""[CSV] #3  rssi: -51   dropped 0
  *      
  *   - TEST_WINDOW
- *      once packet_count reaches this integer the sequence is evaluated.
- *      how many packets received, how many were dropped, and stats on RSSI
+ *      once number of received packages packet_count reaches this integer 
+ *      the sequence is evaluated. 
+ *   - TEST OUTPUT
+ *      Then prints how many packets received, how many were dropped, and stats on RSSI
  *      ""[Test] received: 30, dropped: 0 
           RSSI- min:-55 < avrg: -51 < max:-49
- *       
+ *    
+ *    - emonTx
+ *      for EmonTx change the deifnition of the LED pin
+ *      and uncomment the line defining RFM69HW
+ *      
  *       */
- 
+
 #include <RFM69.h>    //get it here: https://www.github.com/lowpowerlab/rfm69
 #include "RF_lib.h"
 #include <SPI.h>
@@ -33,22 +39,18 @@
 #define BITRATE_19k2      192
 #define BITRATE_1k9       19
 //#ifdef __AVR_ATmega1284P__
-#define LED           15 // 6 // emonTx has LED on p6      //15 // Moteino MEGAs have LEDs on D15
+#define LED           15  // 6 // emonTx - LED on D6      //15 // Moteino MEGAs - LEDs on D15
 #define BUTTON_INT    1   //user button on interrupt 1 (D3)
 #define BUTTON_PIN    11  //user button on interrupt 1 (D3)
-/*#else
-  #define LED           9 // Moteinos have LEDs on D9
-  #define BUTTON_INT    1 //user button on interrupt 1 (D3)
-  #define BUTTON_PIN    3 //user button on interrupt 1 (D3)
-#endif  */
+
 
 #define FREQUENCY     RF69_433MHZ        //RF69_915MHZ
 #define ENCRYPTKEY    "sampleEncryptKey" //exactly the same 16 characters/bytes on all nodes!
 #define SERIAL_BAUD   115200
-#define IS_RFM69HW    //uncomment only for RFM69HW! Remove/comment if you have RFM69W!
+//#define IS_RFM69HW    // COMMENT OUT for emonTx and any other RF module which is NOT RFM69HW.
 
 
-// ***************************** **************** * * * * * define Settings
+// **********************   ******* * * * * * define Settings
 // *
 
 #define NODEID              MASTER                 // MASTER / SLAVE
@@ -65,6 +67,7 @@ uint8_t CSV_OUTPUT          = 1;
 
 uint16_t TEST_WINDOW =      50;
 period_t BEACON_SLEEP =      SLEEP_500MS;
+
 
 // **************************************** * * * * *  * Program variables
 char buff[100];
@@ -100,6 +103,7 @@ struct RF_msg {
   uint8_t datalen;
   uint8_t ack_requested;
 }message;
+
 
 // ************************************ * * * * Setup
 // *
